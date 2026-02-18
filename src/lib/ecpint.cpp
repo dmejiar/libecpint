@@ -329,19 +329,32 @@ namespace libecpint {
 			b_bound = 0.0;
 			for (int i = 0; i < shellB.exps.size(); i++)
 				b_bound += FAST_POW[data.LB](std::sqrt(Nb_0 / (shellB.exps[i] * sigma_b))) * std::abs(shellB.coeffs[i]);
-			
-			double Tk_0 = 2.0 * atilde * btilde * data.Am * data.Bm; 
-			ab_bound = 0.0;
-			xp = atilde*atilde*data.A2 + btilde*btilde*data.B2;
-			for (int k = U.l_starts[l]; k < U.l_starts[l+1]; k++) {
+
+			if (l == U.getL()) {
+				ab_bound = 0.0;
+				xp = atilde*atilde*data.A2 + btilde*btilde*data.B2 + 2.0*atilde*btilde*(
+						data.A[0]*data.B[0] + data.A[1]*data.B[1] + data.A[2]*data.B[2]);
+				for (int k = U.l_starts[l]; k < U.l_starts[l+1]; k++) {
+					const GaussianECP& g = U.getGaussian(k);
+					ztilde = atilde + btilde + g.a;
+					ab_bound += std::abs(g.d) * FAST_POW[3](std::sqrt(M_PI/g.a)) * std::exp(xp/ztilde);
+				}
+				ab_bound *= std::exp(-atilde*data.A2 -btilde*data.B2);
+				results[l] = a_bound*b_bound*ab_bound;
+			} else {
+				double Tk_0 = 2.0 * atilde * btilde * data.Am * data.Bm; 
+				ab_bound = 0.0;
+				xp = atilde*atilde*data.A2 + btilde*btilde*data.B2;
+				for (int k = U.l_starts[l]; k < U.l_starts[l+1]; k++) {
         const GaussianECP& g = U.getGaussian(k);
-				ztilde = atilde + btilde + g.a;
-				Tk = Tk_0 / ztilde;
-				Tk = Tk > 1 ? 0.5 * std::exp(Tk) / Tk : SINH_1;
-				ab_bound += std::abs(g.d) * FAST_POW[3](std::sqrt(M_PI/g.a)) * std::exp(xp / ztilde) * Tk;
+					ztilde = atilde + btilde + g.a;
+					Tk = Tk_0 / ztilde;
+					Tk = Tk > 1 ? 0.5 * std::exp(Tk) / Tk : SINH_1;
+					ab_bound += std::abs(g.d) * FAST_POW[3](std::sqrt(M_PI/g.a)) * std::exp(xp / ztilde) * Tk;
+				}
+				ab_bound *= std::exp(-atilde*data.A2 -btilde*data.B2);
+				results[l] = (2*l+1)*(2*l+1)* a_bound * b_bound * ab_bound;
 			}
-			ab_bound *= std::exp(-atilde*data.A2 -btilde*data.B2);
-			results[l] = (2*l+1)*(2*l+1)* a_bound * b_bound * ab_bound;
 		}
 	}
 

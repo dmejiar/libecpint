@@ -68,7 +68,7 @@ namespace libecpint {
 		K[0][0] = 1.0;
 		double z, z2; // z and z^2 / 2
 		double ratio; // F_j(z) / (2j+1)!!
-		for (int i = 0; i <= N; i++) {
+		for (int i = 1; i <= N; i++) {
 			// Calculate K(z) at equally spaced points z = 16/N to 16
 			z = i / (N/16.0);
 			z2 = z * z / 2.0;
@@ -82,7 +82,8 @@ namespace libecpint {
 			int j;
 			for (j = 1; j <= l; j++) {
 			
-				if (ratio < accuracy) {
+				// if (ratio < accuracy) { // DMR: Might end prematurely
+				if (ratio/K[i][0] < std::numeric_limits<double>::epsilon()) { // DMR: Better compute to machine precision
 					// Reached convergence
 					break;
 				} 
@@ -94,10 +95,11 @@ namespace libecpint {
 			//if ( ratio > accuracy ) { retval = -1; break; } // Not converged
 
 			// Calculate K_l from K_0
-			z2 = z;
-			for (l=1; l<=lmax; l++) {
+			// z2 = z; // Switched to backward accumulation even for l = 0
+			z2 = 1.0;
+			for (l=0; l<=lmax; l++) {
 				ratio = 0;
-				for (int m=0; m < j; m++) ratio += F[m]/DFAC[2*l + 2*m + 1]; 
+				for (int m=j-1; m >= 0; m--) ratio += F[m]/DFAC[2*l + 2*m + 1]; 
 				K[i][l] = z2 * ratio;
 				z2 *= z; 
 			}
@@ -132,7 +134,11 @@ namespace libecpint {
 		int minix = L > 0 ? 1 : 0;
 		ix = std::min(N, std::max(minix, ix));
 		int lx = std::min(L, lMax);
-		return K[ix][lx];
+		// For L > 0, the upper bound can be on the right side
+		double bound = K[ix][lx];
+		if (L > 0 && ix < N)
+		  if (K[ix+1][lx] > bound) {bound = K[ix+1][lx];}
+		return bound;
 	}
 
 	// Calculate modified spherical Bessel function K_l(z), weighted with an exponential factor e^(-z)
@@ -144,7 +150,10 @@ namespace libecpint {
 		}
 	
 		// Set K_0(z) = 1.0, and K_l(z) = 0.0 (for l != 0) if z <= 0
-		if (z <= 0) values[0] = 1.0;
+		if (z <= 0) {
+			values[0] = 1.0;
+			for(int l = 1; l <= maxL; l++) values[l] = 0.0; // Probably not needed, just a safeguard
+		}
 		// Zeroth order case
 		// K_l(z) ~ (1-z)*z^l / (2l + 1)!!
 		else if (z < SMALL) { 
@@ -204,11 +213,11 @@ namespace libecpint {
 	double BesselFunction::calculate(const double z, const int L) const {
 		double value = 0.0;
 		
-		if (z <= 0) value = 1.0;
+		if (z <= 0 && L == 0) value = 1.0;
 		else if (z < SMALL) {
 			value = 1.0 - z;
 			for (int k = 1; k < L+1; k++)
-				value *= z/(2.0*L+1.0);
+				value *= z/(2.0*k+1.0); // The denominator should be a double factorial
 		} else if (z > 16.0) {
 			double v0 = 0.5/z;
 			value = 1.0;

@@ -140,20 +140,28 @@ namespace libecpint {
 			double dT; // T_{2n+1} - 2T_n
 			int ix; // Index needs to be calculated to know which points to use
 			int p = (M+1) / 2; // M / 2^n 
+			double TOL = 3.0/8.0 * tolerance;
 			while (n < maxN && !converged) {
 				// Compute T_{2n+1}
 				T2n1 = Tn + sumTerms(f, params, n, start, end, p, 2);
 			
 				// Check convergence
 				dT = T2n1 - 2.0*Tn;
-				n = 2*n + 1;
-				if (dT*dT <= fabs(T2n1 - Tn12)*tolerance) {
-					converged = true;  
+				if (n > 7 && fabs(dT/T2n1) <= 0.5 * TOL) {
+					// Relative error is small enough
+					converged = true;
+				} else if (n >= 511 && fabs(dT) <= TOL*(n + 1)) {
+					// Absolute error is small enough
+					converged = true;
+				} else if (n >= 511 && fabs(T2n1 - Tn12) <= TOL*(n + 1)) {
+					// To catch oscillatory behavior
+					converged = true;
 				} else {
 					Tn12 = 4.0 * Tn; 
 					Tn = T2n1;
 					p /= 2; 
 				}
+				n = 2*n + 1;
 			}
 			// Finalise the integral
 			I = 16.0 * T2n1 / (3.0*(n + 1.0));
@@ -226,18 +234,19 @@ namespace libecpint {
 		assert(end >= 0 && end < maxN);
 		assert(end >= start);
 
-		double value = 0.0;
+		double value1 = 0.0;
+		double value2 = 0.0;
 		int ix; 
 		for (int i = 0; i <= limit; i+=2) {	
 			ix = (skip*i + 1)*shift - 1;
 			if (ix >= start)
-				value += w[ix] * f(x[ix], p, ix);
+				value1 += w[ix] * f(x[ix], p, ix);
 		
 			ix = maxN - ix - 1; 
 			if (ix <= end)
-				value += w[ix] * f(x[ix], p, ix);
+				value2 += w[ix] * f(x[ix], p, ix);
 		}
-		return value;
+		return value1 + value2;
 	}
 
 	// The GC integrations above are over the interval [-1, 1] and thus need to be transformed
@@ -258,9 +267,10 @@ namespace libecpint {
 		double osz = 1.0 / sqrt(z);
 	
 		// Determine interval
-		double rmin = p - 7.0 * osz;
+		// Use symmetric interval as in Song15
+		double rmin = p - 6.0 * osz;
 		rmin = rmin > 0 ? rmin : 0.0;
-		double rmax = p + 9.0 * osz;
+		double rmax = p + 6.0 * osz;
 	
 		// Find the relative and absolute midpoints 
 		double rmid = 0.5*(rmax - rmin); // Midpoint of interval relative to rmin
@@ -278,9 +288,10 @@ namespace libecpint {
 		double osz = 1.0 / sqrt(z);
 	
 		// Determine interval
-		double rmin = p - 7.0 * osz;
+		// Use symmetric interval as in Song15
+		double rmin = p - 6.0 * osz;
 		rmin = rmin > 0 ? rmin : 0.0;
-		double rmax = p + 9.0 * osz;
+		double rmax = p + 6.0 * osz;
 	
 		// Find the relative and absolute midpoints 
 		double rmid = 0.5*(rmax - rmin); // Midpoint of interval relative to rmin

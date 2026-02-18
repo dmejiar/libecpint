@@ -30,6 +30,7 @@
 #include "Faddeeva.hpp"
 #endif
 #include <iostream>
+#include <iomanip>
 
 namespace libecpint {
 	
@@ -113,7 +114,9 @@ namespace libecpint {
       const double a, const double b, const double A, const double B) const {
 		int gridSize = primGrid.getN();
 		double zt = n+a+b;
-		double pt = (a*A + b*B)/zt;
+		// double pt = (a*A + b*B)/zt;
+		// DMR: Use the modal point of the distribution as grid center
+	    double pt = estimate_modal_point(N, l1, l2, n, a, b, A, B);
 		auto transformedGrid = primGrid;
 		transformedGrid.transformRMinMax(zt, pt);
 		std::vector<double> &gridPoints = transformedGrid.getX();
@@ -131,7 +134,7 @@ namespace libecpint {
 		Ftab[0] = FAST_POW[N](z) * exp(-n * z * z - a * zA * zA - b * zB * zB) * besselValue1 * besselValue2;
 		
 		int i = 1;
-		double TOL = tolerance; ////(double(gridSize));
+		double TOL = tolerance/100.0; ////(double(gridSize));
 		bool not_in_tail = true;
 		double delta=1.0;
 		while (not_in_tail && i < gridSize) {
@@ -154,6 +157,7 @@ namespace libecpint {
 		std::function<double(double, const double*, int)> intgd = RadialIntegral::integrand;
 		
 		// There should be no instances where this fails, so no backup plan to large grid, but return check just in case 
+		// DMR: Tighten threshold to match default value
 		return transformedGrid.integrate(intgd, Ftab, 1e-12, 0, primGrid.getN() - 1);
 	}
 	
@@ -226,7 +230,7 @@ namespace libecpint {
 							
 							int ijk = i*10000 + j*100 + k; 
 							double result = 0.0;
-							if (a * b > MIN_EXP) {// && b > MIN_EXP) { 
+							if (a * b > MIN_EXP && std::abs(oP2) > 0.0) {// && b > MIN_EXP) { 
 								switch(ijk) {
 									case 2 : {
 										result = ( 1 ) * values[0];
@@ -738,7 +742,8 @@ namespace libecpint {
 										if (estimate_type2(k, i, j, u.a, a, b, A, B) > tolerance){ 
 											std::pair<double, bool> quadval = integrate_small(k, i, j, u.a, a, b, A, B);
 											result = quadval.first; 
-											if (!quadval.second) std::cout << "Quadrature failed" << std::endl; 
+											// DMR: Switch to standard error
+											if (!quadval.second) std::cerr << "Quadrature failed" << std::endl; 
 										}
 									}
 								}
@@ -746,7 +751,8 @@ namespace libecpint {
 								if (estimate_type2(k, i, j, u.a, a, b, A, B) > tolerance){ 
 									std::pair<double, bool> quadval = integrate_small(k, i, j, u.a, a, b, A, B);
 									result = quadval.first; 
-									if (!quadval.second) std::cout << "Quadrature failed" << std::endl; 
+									// DMR: Switch to standard error
+									if (!quadval.second) std::cerr << "Quadrature failed" << std::endl; 
 								}
 							} 
 							

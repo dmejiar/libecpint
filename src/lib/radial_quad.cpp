@@ -33,11 +33,11 @@ namespace libecpint {
 
 	void RadialIntegral::init(int maxL, double tol, int small, int large) {
 		bigGrid.initGrid(large, ONEPOINT);
-		primGrid.initGrid(128, ONEPOINT); 
-		smallGrid.initGrid(small, TWOPOINT);
+		primGrid.initGrid(1024, ONEPOINT); // DMR: Some instances do fail with size < 512
+		smallGrid.initGrid(small, ONEPOINT); // DMR: Better use ONEPOINT
 		smallGrid.transformZeroInf();
 	
-		bessie.init(maxL, 1600, 200, tol);
+		bessie.init(maxL, 1600, 150, tol); // DMR: (2*150 - 1)!! is the largest that can be converted to doubles
 	
 		tolerance = tol;
 	}
@@ -45,7 +45,7 @@ namespace libecpint {
 	void RadialIntegral::buildBessel(
 	    const std::vector<double> &r, const int nr, const int maxL, TwoIndex<double> &values, const double weight) const {
 		std::vector<double> besselValues(maxL+1, 0.0);
-		if (std::abs(weight) < 1e-15) {
+		if (std::abs(weight) < tolerance/100.0) {
 			for (int i = 0; i < nr; i++) {
 				values(0, i) = 1.0;
 				for (int l = 1; l <= maxL; l++) values(l, i) = 0.0;
@@ -135,7 +135,7 @@ namespace libecpint {
 			    grid.integrate(intgd, params, tolerance, start, end);
 			values[l] = integral_and_test.first;
 			test = integral_and_test.second;
-			if (test == 0) break;
+			// if (test == 0) break; // DMR: Compute all integrals even if one fails
 		}
 		return test;
 	}
@@ -153,6 +153,8 @@ namespace libecpint {
 		const auto & P = parameters.P;
 		const auto & P2 = parameters.P2;
 		const auto & K = parameters.K;
+
+		const double zeta = U.min_exp_l[U.getL()];
 
 		// Now pretabulate integrand
 		TwoIndex<double> intValues(maxL+1, gridSize, 0.0);
@@ -177,7 +179,22 @@ namespace libecpint {
 			
 				// Reset grid starting points
 				GCQuadrature newGrid = bigGrid;
-				newGrid.transformRMinMax(p(a, b), (za * A + zb * B)/p(a, b));
+
+				double ptmin = 1000.0;
+				double ptmax = 0.0;
+				double zt = p(a, b) + zeta;
+				double Rp = (za * A + zb * B)/zt;
+				for (int i = U.l_starts[U.getL()]; i < U.l_starts[U.getL()+1]; i++) {
+					const GaussianECP& g = U.getGaussian(i);
+					ptmin = std::min(ptmin, estimate_modal_point(N+2+g.n, 0, 0, g.a, zt, 0.0, Rp, 0.0));
+					ptmax = std::max(ptmax, estimate_modal_point(N+2+g.n, maxL, 0, g.a, zt, 0.0, Rp, 0.0));
+				}
+				double pt = 0.5*(ptmin + ptmax);
+				double denom = pt - ptmin + 6.0/std::sqrt(zt);
+				double factor = 36.0/(denom*denom);
+
+				newGrid.transformRMinMax(factor, pt);
+
 				std::vector<double> &gridPoints = newGrid.getX();
 				auto start = 0;
 				auto end = gridSize - 1;
@@ -190,10 +207,15 @@ namespace libecpint {
 				// Start building intvalues, and prescreen
 				bool foundStart = false, tooSmall = false;
 				for (int i = 0; i < gridSize; i++) {
+					// DMR: deactivate prescreen for now, since it can fail due to the 
+					// contracted nature of Utab with different powers of r, and the
+					// variation of the modal point with l.
+					tooSmall = true;
 					for (int l = offset; l <= maxL; l+=2) {
 						intValues(l, i) = Utab[i] * besselValues(l, i); 
-						tooSmall = tooSmall || (intValues(l, i) < tolerance);
+						tooSmall = tooSmall && (fabs(intValues(l, i)) < tolerance/100.0);
 					}
+					/*
 					if (!tooSmall && !foundStart) {
 						foundStart = true; 
 						start = i;
@@ -202,6 +224,7 @@ namespace libecpint {
 						end = i-1;
 						break;
 					}
+						*/
 				}
 			
 				for (int i = start; i <= end; i++) {
@@ -212,7 +235,7 @@ namespace libecpint {
 				}
 
 				int test = integrate(maxL, gridSize, intValues, newGrid, tempValues, start, end, offset, 2);
-				if (test == 0) std::cerr << "Failed to converge" << std::endl;
+				if (test == 0) std::cerr << "Type 1 Failed to converge" << std::endl;
 				
 				// Calculate real spherical harmonic
 				x = std::abs(P(a, b)) < 1e-12 ? 0.0 : (za * data.A[2] + zb * data.B[2]) / (p(a, b) * P(a, b));
@@ -263,12 +286,9 @@ namespace libecpint {
       const double a, const double b, const double A, const double B) const {
 		double kA = 2.0*a*A;
 		double kB = 2.0*b*B;
-		double c0 = std::max(N - l1 - l2, 0);
-		double c1_min = kA + kB;
 		double p = a + b + n;
 
-		double P = c1_min + std::sqrt(c1_min*c1_min + 8.0*p*c0);
-		P /= (4.0*p);
+		double P = estimate_modal_point(N, l1, l2, n, a, b, A, B);
 
 		double zA = P - A; 
 		double zB = P - B;
@@ -276,6 +296,56 @@ namespace libecpint {
 		double besselValue2 = bessie.upper_bound(kB * P, l2);
 		double Fres = FAST_POW[N](P) * std::exp(-n * P * P - a * zA * zA - b * zB * zB) * besselValue1 * besselValue2;
 		return (0.5 * std::sqrt(M_PI/p) * Fres * (1.0 + std::erf(std::sqrt(p)*P)));
+	}
+
+	double RadialIntegral::estimate_modal_point(
+      const int N, const int l1, const int l2, const double n,
+      const double a, const double b, const double A, const double B) const {
+               double kA = 2.0*a*A;
+               double kB = 2.0*b*B;
+
+               double c1 = (1.0/std::sqrt(2.0))*(kA + kB);
+               double c0 = N - 3.0*(std::sqrt(2.0) - l1 - l2 - 1.0)/std::sqrt(2.0);
+               double p = a + b + n; 
+               c0 = std::max(c0, 0.0);
+
+               double P = (c1 + std::sqrt(c1*c1 + 8.0*p*c0))/(4.0*p);
+
+               double f; 
+               double fp, termA, termB, dtermA, dtermB;
+
+	       // The original paper missed a couple of terms to derive the modal point
+	       // equation. The corresponding terms were added and the ratio of the Bessel
+	       // functions is also taken into account.
+	       //
+	       // The ratio of modified Bessel functionsis approximated using Theorem 4 of
+	       // Journal of Mathematical Analysis and Applications, 443, 1232 (2016)
+               for(int iter=0; iter < 10; iter++) {
+                 
+                 if (A < 1e-6) {
+                       termA = 0.0;
+                       dtermA = 0.0;
+                 } else {
+                       termA = 0.5 - std::sqrt((l1+1.5)*(l1+1.5) + kA*kA*P*P);
+                       dtermA = -(kA*kA*P)/std::sqrt((l1+1.5)*(l1+1.5) + kA*kA*P*P);
+                 }
+
+                 if (B < 1e-6) {
+                       termB = 0.0;
+                       dtermB = 0.0;
+                 } else {
+                       termB = 0.5 - std::sqrt((l2+1.5)*(l2+1.5) + kB*kB*P*P);
+                       dtermB = -(kB*kB*P)/std::sqrt((l2+1.5)*(l2+1.5) + kB*kB*P*P);
+                 }
+                 
+                 f = 2.0*p*P*P - N + 2.0 + termA + termB;
+                 if(fabs(f) < 1e-6) break;
+                 fp = 4.0*p*P + dtermA + dtermB;
+		 		 if(fabs(fp) < 1e-6) break;
+                 P -= f/fp;
+               }
+	       if(P < 0.0) P = 0.0;
+               return P;
 	}
 
 	void RadialIntegral::type2(
@@ -295,6 +365,8 @@ namespace libecpint {
 		const auto & P = parameters.P;
 		const auto & P2 = parameters.P2;
 		const auto & K = parameters.K;
+
+		const double zeta = U.min_exp_l[l];
 
 		// Start with the small grid
 		// Pretabulate U
@@ -324,20 +396,24 @@ namespace libecpint {
 		bool failed = false;
 		int ix = 0;
 		for (int l1 = 0; l1 <= l1end; l1++) {
+			if (failed) break;
 			int l2start = (l1 + N) % 2;
 			for (int l2 = l2start; l2 <= l2end; l2+=2) {
-				
 				for (int i = 0; i < gridSize; i++) params[i] = Utab[i] * Fa(l1, i) * Fb(l2, i);
 				const auto this_integral_and_test = smallGrid.integrate(intgd, params, tolerance, start, end);
 				tests[ix] = this_integral_and_test.second;
 				failed = failed || (tests[ix] == 0);
-				values(l1, l2) = tests[ix] == 0 ? 0.0 : this_integral_and_test.first;
+				if (failed) break;
+				values(l1, l2) = this_integral_and_test.first;
+				// if (tests[ix] == 0) std::cerr << "Type 2 failed to converge" << std::endl;
 				ix++;
 			}
 		}
 	
 		if (failed) {
 			// Not converged, switch to big grid
+			std::cerr << "Type 2 failed to converge" << std::endl;
+			values.assign(l1end+1, l2end+1, 0.0);
 			double zeta_a, zeta_b, c_a, c_b;
 				
 			gridSize = bigGrid.getN();
@@ -353,7 +429,25 @@ namespace libecpint {
 					zeta_b = shellB.exp(b);
 				
 					GCQuadrature newGrid = bigGrid;
-					newGrid.transformRMinMax(p(a, b), (zeta_a * A + zeta_b * B)/p(a, b));
+					// newGrid.transformRMinMax(p(a, b), (zeta_a * A + zeta_b * B)/p(a, b));
+
+					// Since U(r,l) is a contraction of gaussians with different powers of r,
+					// and we are looping over l1 and l2, the modal point of the integrand can vary significantly.
+					// We will center the grid at the middle point of the lowest and highest modal points, 
+					// and will use a factor so the grid cover the range of modal points and tails.
+					double ptmin = 1000.0;
+					double ptmax = 0.0;
+					for (int i = U.l_starts[l]; i < U.l_starts[l+1]; i++) {
+						const GaussianECP& g = U.getGaussian(i);
+						ptmin = std::min(ptmin, estimate_modal_point(N+2+g.n, 0, 0, g.a, zeta_a, zeta_b, A, B));
+						ptmax = std::max(ptmax, estimate_modal_point(N+2+g.n, l1end, l2end, g.a, zeta_a, zeta_b, A, B));
+					}
+					double zt = p(a, b) + zeta;
+					double pt = 0.5*(ptmin + ptmax);
+					double denom = pt - ptmin + 6.0/std::sqrt(zt);
+					double factor = 36.0/(denom*denom);
+					
+					newGrid.transformRMinMax(factor, pt);
 					std::vector<double> &gridPoints2 = newGrid.getX();
 					const auto start = 0;
 					const auto end = gridSize - 1;
@@ -379,14 +473,14 @@ namespace libecpint {
 						
 						for (int l2 = l2start; l2 <= l2end; l2+=2) {
 						
-							if (tests[ix] == 0) {
+							//if (tests[ix] == 0) {
 								for (int i = 0; i < gridSize; i++)
 									params2[i] = Xvals[i] * Fa(l1, i) * Fb(l2, i);
 								const auto integral_and_test =
 								    newGrid.integrate(intgd, params2, tolerance, start, end);
-								if (!integral_and_test.second) std::cerr << "Failed at second attempt" << std::endl;
+								if (!integral_and_test.second) std::cerr << "Type 2 failed at second attempt" << std::endl;
 								values(l1, l2) += c_a * c_b * integral_and_test.first;
-							}
+							//}
 							ix++; 
 						
 						}

@@ -32,7 +32,7 @@ if((NOT GTEST_LIBRARY) OR (NOT GTEST_INCLUDE_DIR))
 
   # Set GTEST interface to temporarily installed libgtest.a
   set(GTEST_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/googletest-build/include)
-  set(GTEST_LIBRARY ${CMAKE_CURRENT_BINARY_DIR}/googletest-build/lib/libgtest.a)
+  set(GTEST_LIBRARY ${CMAKE_CURRENT_BINARY_DIR}/googletest-build/${CMAKE_INSTALL_LIBDIR}/libgtest.a)
   add_library(gtest INTERFACE)
   target_include_directories(gtest INTERFACE ${GTEST_INCLUDE_DIR})
   target_link_libraries(gtest INTERFACE ${GTEST_LIBRARY} Threads::Threads)
