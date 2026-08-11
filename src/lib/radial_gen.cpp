@@ -158,7 +158,7 @@ namespace libecpint {
 		
 		// There should be no instances where this fails, so no backup plan to large grid, but return check just in case 
 		// DMR: Tighten threshold to match default value
-		return transformedGrid.integrate(intgd, Ftab, 1e-12, 0, primGrid.getN() - 1);
+		return transformedGrid.integrate(intgd, Ftab, 1e-15, 0, primGrid.getN() - 1);
 	}
 	
 	void RadialIntegral::type2(
@@ -192,7 +192,7 @@ namespace libecpint {
 						double P1_2 = P1 * P1;
 						double P2_2 = P2 * P2;
 						double oP1 = 1.0 / P1_2;
-						double oP2 = std::abs(P2) < 1e-7 ? 0.0 : 1.0 / P2_2;
+						double oP2 = std::abs(P2) < 1e-14 ? 0.0 : 1.0 / P2_2;
 						double root_p = sqrt(p);
 						double o_root_p = 1.0 / root_p; 
 						double aAbB = a*A*A + b*B*B;
